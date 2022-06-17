@@ -1,0 +1,211 @@
+---
+title: "Entregable 3 (20155978)"
+author: "Frank Pinares Gutiérrez (20155978)"
+date: '2022-06-16'
+output: html_document
+---
+```{r}
+library(rio)
+library(DescTools)
+library(ggplot2)
+library(moments)
+library(Rmisc)
+library(e1071)
+library(psych)
+library(dplyr)
+library(gplots)
+library(vcd)
+library(PMCMRplus)
+library(nortest)
+library(car)
+library(stargazer)
+library(lm.beta)
+library(gtools)
+library(jtools)
+library(ggstance)
+library(broom.mixed)
+library(fastDummies)
+library(writexl)
+library(lmtest)
+library(polycor)
+library(ggcorrplot)
+library(matrixcalc)
+library(GPArotation)
+library(lavaan)
+library(BBmisc)
+```
+
+```{r}
+vdem = import("V-Dem-CY-Core-v12.rds")
+View(vdem)
+```
+
+
+#1. Variable dependiente - Índice de Democracia Liberal (v2x_libdem)
+```{r}
+summary(vdem$v2x_libdem)
+```
+
+```{r}
+str(vdem$v2x_libdem)
+```
+
+#2. Variables independientes - Frank Pinares
+#2.1. Libertad de Expresión
+#2.1.1. Libertad de Discusión para Hombres (v2cldiscm_ord)
+```{r}
+str(vdem$v2cldiscm_ord)
+summary(vdem$v2cldiscm_ord)
+```
+
+#2.1.2. Libertad de Discusión para Mujeres (v2cldiscw_ord)
+```{r}
+str(vdem$v2cldiscw_ord)
+summary(vdem$v2cldiscw_ord)
+```
+
+#2.1.3. Libertad de Expresión Académica y Cultural (v2clacfree_ord)
+```{r}
+str(vdem$v2clacfree_ord)
+summary(vdem$v2clacfree_ord)
+```
+
+#3. Variables independientes - Astrid Rosales
+#3.1. Censura Gubernamental
+#3.1.1. Censura Gubernamental a Medios de Comunicación (v2mecenefm_ord)
+```{r}
+str(vdem$v2mecenefm_ord)
+summary(vdem$v2mecenefm_ord)
+```
+
+#3.1.2. Censura Gubernamental en Internet (v2mecenefi_ord)
+```{r}
+str(vdem$v2mecenefi_ord)
+summary(vdem$v2mecenefi_ord)
+```
+
+#3.1.3. Hostigamiento hacia periodistas (v2meharjrn_ord)
+```{r}
+str(vdem$v2meharjrn_ord)
+summary(vdem$v2meharjrn_ord)
+```
+
+#4. Armar la base de apoyo
+```{r}
+factor_frank = subset(vdem, select = c(country_name, year, v2x_libdem, v2cldiscm_ord, v2cldiscw_ord, v2clacfree_ord, v2mecenefm_ord, v2mecenefi_ord, v2meharjrn_ord))
+```
+
+
+```{r}
+factor_frank = factor_frank[factor_frank$year==2021,]
+```
+
+```{r}
+factor_frank$country_name = NULL
+factor_frank$year = NULL
+factor_frank$v2x_libdem = NULL
+```
+
+#I. Análisis Factorial Exploratorio
+#5. Explorar las correlaciones entre las variables
+```{r}
+corMatrix_f = polycor::hetcor(factor_frank)$correlations
+corMatrix_f
+```
+
+#6. Graficar la matriz de correlaciones
+```{r}
+ggcorrplot(corMatrix_f)
+```
+#7. Verificar validez del análisis factorial
+#7.1. Verificar si variables se pueden factorizar 
+Overall MSA es mayor a 0.6, por lo que el análisis factorial es factible.
+```{r}
+psych::KMO(corMatrix_f)
+```
+#7.2. Descartar una posible matriz de identidad
+Sale FALSE (p-value NO es mayor a 0.05), por lo que el análisis factorial es factible.
+```{r}
+cortest.bartlett(corMatrix_f, n = nrow(factor_frank))$p.value>0.05
+```
+#7.3. Descartar una posible matriz singular
+Sale FALSE, por lo que el análisis factorial es factible.
+```{r}
+is.singular.matrix(corMatrix_f)
+```
+
+#8. Determinar en cuántos factores se pueden agrupar las variables
+```{r}
+fa.parallel(factor_frank, fm = "ML", fa = "fa")
+```
+
+#9. Observar las cargas factoriales y ver en qué factores se ubicaría cada variable
+```{r}
+resfa_f <- fa(factor_frank, nfactors = 1, cor = "mixed", rotate = "varimax", fm = "minres")
+print(resfa_f$loadings, cutoff = 0.5)
+```
+#10. Graficar cómo se agrupan las variables
+```{r}
+fa.diagram(resfa_f)
+```
+#11. Evaluar los resultados obtenidos
+#11.1. ¿Qué variables aportaron más a los factores?
+```{r}
+sort(resfa_f$communality)
+```
+#12. Observar los posibles valores proyectados
+#12.1. Para grabar en la base los puntajes de los factores
+```{r}
+factor_frank$puntaje = resfa_f$scores
+```
+
+
+#II. Análisis Factorial Confirmatorio
+#13. Construir un modelo lineal 
+```{r}
+modelof <- "factorf =~ v2cldiscm_ord+v2cldiscw_ord+v2clacfree_ord+v2mecenefm_ord+v2mecenefi_ord+v2meharjrn_ord"
+```
+
+#14. Crear un objeto para hacer las validaciones
+```{r}
+cfa_fit <- cfa(modelof, data = factor_frank, std.lv = TRUE, missing = "fiml")
+```
+
+#15. Preparar los tests para las validaciones
+```{r}
+allParamCFA = parameterEstimates(cfa_fit, standardized = T)
+allFitCFA = as.list(fitMeasures(cfa_fit))
+```
+
+#16. Ver si cada variable tiene una buena relación con su factor (p-value < 0.05 indica que la variable observable tiene buena relación con su latente)
+```{r}
+allParamCFA[allParamCFA$op=="=~",]
+```
+
+#17. Ver si la asignación de variables ha sido relativamente buena (p-value > 0.05 para validar el modelo)
+```{r}
+allFitCFA[c("chisq", "df", "pvalue")]
+```
+#18. Otra prueba para ver si el análisis factorial es relativamente bueno (índice Tucker-Lewi debe ser mayor a 0.9)
+```{r}
+allFitCFA$tli
+```
+#19. Ver si la raíz del error cuadrático medio de aproximación es menor a 0.05 (ver rmsea)
+```{r}
+allFitCFA[c("rmsea.ci.lower", "rmsea", "rmsea.ci.upper")]
+```
+#20. Hacer predicciones (scores) de las variables latentes
+```{r}
+scorescfa = normalize(lavPredict(cfa_fit), method = "range", margin = 2, range = c(0, 10))
+```
+
+```{r}
+factor_frank$prediccion = scorescfa
+```
+
+
+
+
+
+
+
